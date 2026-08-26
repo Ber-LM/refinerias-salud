@@ -12,7 +12,7 @@ library (fixest)
 library (texreg)
 library (tinytex)
 
-setwd("")
+setwd("C:/Users/bluis/Downloads/")
 
 # Data of Índice de Rezago Social (CONEVAL)
 irs_raw_2010 = read.csv("irs_municipal_2010.csv")
@@ -55,6 +55,7 @@ combined = combined |>
     str_starts(causa_def, "I") ~                              "Diseases of the circulatory system (I00–I99)",
     str_starts(causa_def, "F") ~                              "Mental and behavioural disorders (F00–F99)",
     str_starts(causa_def, "C") | str_starts(causa_def, "D") ~ "Neoplasms (C00–D48)",
+    str_starts(causa_def, "R") ~                              "Ill defined illnesses (R00–R99)",
     TRUE ~ NA_character_))
 
 def_final = combined |> 
@@ -63,7 +64,8 @@ def_final = combined |>
   filter(between(anio_ocur, 2012, 2024)) |>
   rename(AÑO = anio_ocur) |> 
   mutate(CLAVE = ent_resid * 1000 + mun_resid) |> 
-  count(CLAVE, AÑO, grupo_causa, name = "def_totales")
+  count(CLAVE, AÑO, grupo_causa, name = "def_totales") |> 
+  complete(CLAVE, AÑO, grupo_causa, fill = list(def_totales = 0))
 
 # Population data
 pob_all_y = pob_all_y_raw |> 
@@ -75,14 +77,15 @@ pob_all_y = pob_all_y_raw |>
   mutate(city_qs = ifelse(POB_TOTAL >= 100000,1,0))
 
 ## Now join!
-base_final = def_final |> 
-  inner_join(pob_all_y, by = c("CLAVE", "AÑO")) |>
+base_final = pob_all_y |>
+  cross_join(tibble(grupo_causa = unique(na.omit(combined$grupo_causa)))) |> 
+  left_join(def_final, by = c("CLAVE", "AÑO", "grupo_causa")) |>
+  mutate(def_totales = replace_na(def_totales, 0)) |>
   mutate(tasa_1k = (def_totales / POB_TOTAL) * 1000) |> 
-  mutate(refineria = ifelse(CLAVE %in% c(13076, 19009, 20079, 28009, 11027, 30108),1,0)) |> 
-  mutate(irs_wave = case_when(
-    AÑO <= 2012 ~ 2010,
-    AÑO <= 2017 ~ 2015,
-    TRUE ~        2020)) |> 
+  mutate(refineria = ifelse(CLAVE %in% c(13076, 19009, 20079, 28009, 11027, 30108), 1, 0)) |> 
+  mutate(irs_wave = case_when(AÑO <= 2012 ~ 2010,
+                              AÑO <= 2017 ~ 2015,
+                              TRUE ~ 2020)) |> 
   inner_join(irs_full, by = c("CLAVE", "irs_wave"))
 
 ## First model
@@ -94,14 +97,14 @@ modelos = feols(tasa_1k ~ refineria + city_qs + irs_value | AÑO,
 etable(modelos)
 
 # Table 1
-tabla_tex = etable(modelos[c(1,2,3,4)],
+tabla_tex = etable(modelos[c(1,2,3,5)],
                    dict = c("AÑO" = "Year",
                             refineria = "Oil refinery",
                             CLAVE = "Municipality",
                             city_qs = "City?",
                             irs_value = "Social lag index",
                             tasa_1k = "Mortality rate per 1,000 inhabitants"),
-                   headers = c("Circulatory", "Respiratory","Mental" ,"Neoplasms [Tumors]"),
+                   headers = c("Circulatory", "Respiratory","Ill defined" ,"Neoplasms [Tumors]"),
                    tex = TRUE,
                    title = "Association between the presence of an operating oil refinery and the mortality rate per one thousand inhabitants at the municipal level",
                    label = "tab:oil refinery")
@@ -125,6 +128,96 @@ close(con)
 
 tinytex::pdflatex("tabla_todos.tex")
 
+#################################################################################
+## Graphs
+refinerias = base_final |> 
+  filter(refineria == 1)
+
+nacional = base_final |> 
+  filter(refineria == 0) |> 
+  group_by(AÑO, grupo_causa) |> 
+  summarise(tasa_1k = sum(def_totales) / sum(POB_TOTAL) * 1000, 
+            .groups = "drop")
+
+ggplot() +
+  geom_line(data = refinerias |> filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = tasa_1k, group = NOM_MUN, color = NOM_MUN),
+            linewidth = 0.7) +
+  geom_line(data = nacional |> filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = tasa_1k),
+            color = "black", linewidth = 1.2, linetype = "dashed") +
+  facet_wrap(~ grupo_causa, scales = "free_y") +
+  scale_x_continuous(breaks = 2012:2024)+
+  labs(x = "Year", 
+       y = "Resident deaths per 1,000 inhabitants",
+       color = "Municipalities with refineries",
+       caption = "
+       Dashed black line: national average of municipalities without a refinery,
+       Data from INEGI (mortality) and CONAPO (yearly population estimates), graph created by Bernardo Luis and Emilio del Río") +
+  theme_minimal() +
+  theme(legend.position = "bottom")+
+  theme(plot.caption = element_text(hjust = 0),              
+        plot.caption.position = "plot",                      
+        axis.title.y = element_text(margin = margin(r = 10)))
+ggsave("grafica_desc_no_agreg.png", width = 12, height = 7, dpi = 300)
+
+
+### Aggregated
+refinerias_grouped = refinerias |> 
+  group_by(AÑO, grupo_causa) |> 
+  summarise(ref_1k_tasa = sum(def_totales) / sum(POB_TOTAL) * 1000) |> 
+  data.frame()
+
+nacional |> 
+  inner_join(refinerias_grouped, by = c("AÑO", "grupo_causa")) |> 
+  group_by(grupo_causa) |> 
+  summarise(mean_nac = mean(tasa_1k),
+            mean_ref = mean(ref_1k_tasa)) |> 
+  data.frame() |> 
+  mutate(per_diff = ((mean_ref/mean_nac)-1))
+
+ggplot() +
+  geom_line(data = refinerias_grouped |> filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = ref_1k_tasa),
+            linewidth = 0.7, color = "red") +
+  geom_line(data = nacional |> filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = tasa_1k),
+            color = "black", linewidth = 1.2, linetype = "dashed") +
+  facet_wrap(~ grupo_causa, scales = "free_y") +
+  scale_x_continuous(breaks = 2012:2024)+
+  labs(x = "Year", 
+       y = "Resident deaths per 1,000 inhabitants",
+       caption = "
+       Dashed black line: national average of municipalities without a refinery, Red line: average of municipalities with a refinery,
+       Data from INEGI (mortality) and CONAPO (yearly population estimates), graph created by Bernardo Luis and Emilio del Río") +
+  theme_minimal()+
+  theme(plot.caption = element_text(hjust = 0),              
+        plot.caption.position = "plot",                      
+        axis.title.y = element_text(margin = margin(r = 10)))
+ggsave("grafica_desc_agreg.png", width = 12, height = 7, dpi = 300)
+
+
+### Just for ill defined causes
+ggplot() +
+  geom_line(data = refinerias_grouped |> filter(grupo_causa == "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = ref_1k_tasa),
+            linewidth = 0.7, color = "red") +
+  geom_line(data = nacional |> filter(grupo_causa == "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = tasa_1k),
+            color = "black", linewidth = 1.2, linetype = "dashed") +
+  facet_wrap(~ grupo_causa, scales = "free_y") +
+  scale_x_continuous(breaks = 2012:2024)+
+  labs(x = "Year", 
+       y = "Resident deaths per 1,000 inhabitants",
+       caption = "
+       Dashed black line: national average of municipalities without a refinery, Red line: average of municipalities with a refinery,
+       Data from INEGI (mortality) and CONAPO (yearly population estimates), graph created by Bernardo Luis and Emilio del Río") +
+  theme_minimal()+
+  theme(plot.caption = element_text(hjust = 0),              
+        plot.caption.position = "plot",                      
+        axis.title.y = element_text(margin = margin(r = 10)))
+ggsave("grafica_ill_defined.png", width = 12, height = 7, dpi = 300)
+
 
 ####################### For 60+ ##############################
 def_final = combined |> 
@@ -134,10 +227,10 @@ def_final = combined |>
   rename(AÑO = anio_ocur) |> 
   mutate(CLAVE = ent_resid * 1000 + mun_resid) |> 
   filter(between(edad, 4060, 4120)) |>
-  count(CLAVE, AÑO, grupo_causa, name = "def_totales")
+  count(CLAVE, AÑO, grupo_causa, name = "def_totales") |> 
+  complete(CLAVE, AÑO, grupo_causa, fill = list(def_totales = 0))
 
 # Population data
-pob_all_y_raw = read_excel("1_Grupo_Quinq_00_RM.xlsx")
 pob_all_y = pob_all_y_raw |> 
   mutate(POB_60_plus = rowSums(across(POB_60_64:POB_85_mm), na.rm = TRUE)) |>
   select(CLAVE, NOM_ENT, NOM_MUN,AÑO, POB_60_plus, POB_TOTAL) |>
@@ -149,14 +242,15 @@ pob_all_y = pob_all_y_raw |>
   mutate(city_qs = ifelse(POB_TOTAL >= 100000,1,0))
 
 ## Now join!
-base_final = def_final |> 
-  inner_join(pob_all_y, by = c("CLAVE", "AÑO")) |>
+base_final = pob_all_y |>
+  cross_join(tibble(grupo_causa = unique(na.omit(combined$grupo_causa)))) |> 
+  left_join(def_final, by = c("CLAVE", "AÑO", "grupo_causa")) |>
+  mutate(def_totales = replace_na(def_totales, 0)) |>
   mutate(tasa_1k = (def_totales / POB_60mas) * 1000) |> 
-  mutate(refineria = ifelse(CLAVE %in% c(13076, 19009, 20079, 28009, 11027, 30108),1,0)) |> 
-  mutate(irs_wave = case_when(
-    AÑO <= 2012 ~ 2010,
-    AÑO <= 2017 ~ 2015,
-    TRUE ~        2020)) |> 
+  mutate(refineria = ifelse(CLAVE %in% c(13076, 19009, 20079, 28009, 11027, 30108), 1, 0)) |> 
+  mutate(irs_wave = case_when(AÑO <= 2012 ~ 2010,
+                              AÑO <= 2017 ~ 2015,
+                              TRUE ~ 2020)) |> 
   inner_join(irs_full, by = c("CLAVE", "irs_wave"))
 
 ## Second model
@@ -168,14 +262,14 @@ modelos_60 = feols(tasa_1k ~ refineria + city_qs + irs_value | AÑO,
 etable(modelos_60)
 
 # Table body
-tabla_tex = etable(modelos_60[c(1,2,3,4)],
+tabla_tex = etable(modelos_60[c(1,2,3,5)],
                    dict = c("AÑO" = "Year",
                             refineria = "Oil refinery",
                             CLAVE = "Municipality",
                             city_qs = "City?",
                             irs_value = "Social lag index",
                             tasa_1k = "Mortality rate per 1,000 inhabitants aged 60+"),
-                   headers = c("Circulatory", "Respiratory", "Mental" ,"Neoplasms [Tumors]"),
+                   headers = c("Circulatory", "Respiratory", "Ill defined" ,"Neoplasms [Tumors]"),
                    tex = TRUE,
                    title = "Association between the presence of an operating oil refinery and the mortality rate per one thousand inhabitants aged 60 plus at the municipal level",
                    label = "tab:oil refinery")
@@ -200,62 +294,27 @@ close(con)
 
 tinytex::pdflatex("tabla.tex")
 
+#########################################################################
 
-#########################################################
-
-## Graphs
-refinerias = base_final |> 
+refinerias_60 = base_final |> 
   filter(refineria == 1)
 
-nacional = base_final |> 
-  filter(refineria == 0) |> 
+refinerias_grouped_60 = refinerias_60 |> 
   group_by(AÑO, grupo_causa) |> 
-  summarise(tasa_1k = sum(def_totales) / sum(POB_TOTAL) * 1000, 
-            .groups = "drop")
-
-ggplot() +
-  geom_line(data = refinerias,
-            aes(x = AÑO, y = tasa_1k, group = NOM_MUN, color = NOM_MUN),
-            linewidth = 0.7) +
-  geom_line(data = nacional,
-            aes(x = AÑO, y = tasa_1k),
-            color = "black", linewidth = 1.2, linetype = "dashed") +
-  facet_wrap(~ grupo_causa, scales = "free_y") +
-  scale_x_continuous(breaks = 2012:2024)+
-  labs(x = "Year", 
-       y = "Resident deaths per 1,000 inhabitants",
-       color = "Municipalities with refineries",
-       caption = "
-       Dashed black line: national average of municipalities without a refinery,
-       Data from INEGI (mortality) and CONAPO (yearly population estimates), graph created by Bernardo Luis and Emilio del Río") +
-  theme_minimal() +
-  theme(legend.position = "bottom")+
-  theme(plot.caption = element_text(hjust = 0),              
-        plot.caption.position = "plot",                      
-        axis.title.y = element_text(margin = margin(r = 10)))
-ggsave("grafica_desc_no_agreg.png", width = 12, height = 7, dpi = 300)
-
-refinerias_grouped = refinerias |> 
-  group_by(AÑO, grupo_causa) |> 
-  summarise(media_1k_ref = mean(tasa_1k)) |> 
+  summarise(ref_1k_tasa = sum(def_totales) / sum(POB_60mas) * 1000) |> 
   data.frame()
 
-ggplot() +
-  geom_line(data = refinerias_grouped,
-            aes(x = AÑO, y = media_1k_ref),
-            linewidth = 0.7, color = "red") +
-  geom_line(data = nacional,
-            aes(x = AÑO, y = tasa_1k),
-            color = "black", linewidth = 1.2, linetype = "dashed") +
-  facet_wrap(~ grupo_causa, scales = "free_y") +
-  scale_x_continuous(breaks = 2012:2024)+
-  labs(x = "Year", 
-       y = "Resident deaths per 1,000 inhabitants",
-       caption = "
-       Dashed black line: national average of municipalities without a refinery, Red line: average of municipalities with a refinery,
-       Data from INEGI (mortality) and CONAPO (yearly population estimates), graph created by Bernardo Luis and Emilio del Río") +
-  theme_minimal()+
-  theme(plot.caption = element_text(hjust = 0),              
-        plot.caption.position = "plot",                      
-        axis.title.y = element_text(margin = margin(r = 10)))
-ggsave("grafica_desc_agreg.png", width = 12, height = 7, dpi = 300)
+nacional_60 = base_final |> 
+  filter(refineria == 0) |> 
+  group_by(AÑO, grupo_causa) |> 
+  summarise(tasa_1k = sum(def_totales) / sum(POB_60mas) * 1000, 
+            .groups = "drop")
+
+nacional_60 |> 
+  inner_join(refinerias_grouped_60, by = c("AÑO", "grupo_causa")) |> 
+  group_by(grupo_causa) |> 
+  summarise(mean_nac = mean(tasa_1k),
+            mean_ref = mean(ref_1k_tasa)) |> 
+  data.frame() |> 
+  mutate(per_diff = ((mean_ref/mean_nac)-1))
+
