@@ -22,10 +22,12 @@ irs_raw_2020 = read.csv("irs_municipal_2020.csv")
 irs_full = bind_rows(irs_raw_2010, irs_raw_2015, irs_raw_2020)
 
 # Population data (CONAPO)
-pob_all_y_raw = read_excel("1_Grupo_Quinq_00_RM.xlsx")
+pob_all_y_raw = read_excel("1_Grupo_Quinq_00_RM.xlsx") # https://www.gob.mx/conapo/documentos/reconstruccion-y-proyecciones-de-la-poblacion-de-los-municipios-de-mexico-1990-2040
 
-# Mortality data (INEGI)
-def_raw_2024 = read.csv("conjunto_de_datos_edr2024_csv/conjunto_de_datos/conjunto_de_datos_defunciones_registradas24_csv.csv")
+# Mortality data (INEGI) 
+# https://www.inegi.org.mx/programas/edr/#datos_abiertos
+
+def_raw_2024 = read.csv("conjunto_de_datos_defunciones_registradas24_csv.csv")
 def_raw_2023 = read.csv("conjunto_de_datos_defunciones_registradas_2023_csv.csv")
 def_raw_2022 = read.csv("conjunto_de_datos_defunciones_registradas_2022.csv")
 def_raw_2021 = read.csv("conjunto_de_datos_defunciones_registradas_2021.csv")
@@ -317,4 +319,5 @@ nacional_60 |>
             mean_ref = mean(ref_1k_tasa)) |> 
   data.frame() |> 
   mutate(per_diff = ((mean_ref/mean_nac)-1))
+
 
