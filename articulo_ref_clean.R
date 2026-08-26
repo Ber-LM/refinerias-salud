@@ -12,7 +12,7 @@ library (fixest)
 library (texreg)
 library (tinytex)
 
-setwd("C:/Users/bluis/Downloads/")
+setwd("")
 
 # Data of Índice de Rezago Social (CONEVAL)
 irs_raw_2010 = read.csv("irs_municipal_2010.csv")
