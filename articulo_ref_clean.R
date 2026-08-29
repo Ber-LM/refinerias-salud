@@ -4,15 +4,15 @@
 rm(list=ls())
 options(scipen=999)
 
-library (tidyverse)
-library (readxl)
-library (purrr)
-library (stargazer)
-library (fixest)
-library (texreg)
-library (tinytex)
+pacman::p_load(tidyverse,
+               readxl,
+               purrr,
+               stargazer,
+               fixest,
+               texreg,
+               tinytex)
 
-setwd("")
+setwd("/Users/miaumiau/Downloads/")
 
 # Data of Índice de Rezago Social (CONEVAL)
 irs_raw_2010 = read.csv("irs_municipal_2010.csv")
@@ -150,17 +150,36 @@ ggplot() +
             color = "black", linewidth = 1.2, linetype = "dashed") +
   facet_wrap(~ grupo_causa, scales = "free_y") +
   scale_x_continuous(breaks = 2012:2024)+
-  labs(x = "Year", 
+  labs(x = "", 
        y = "Resident deaths per 1,000 inhabitants",
-       color = "Municipalities with refineries",
-       caption = "
-       Dashed black line: national average of municipalities without a refinery,
-       Data from INEGI (mortality) and CONAPO (yearly population estimates), graph created by Bernardo Luis and Emilio del Río") +
+       color = "Municipalities with refineries") +
   theme_minimal() +
-  theme(legend.position = "bottom")+
   theme(plot.caption = element_text(hjust = 0),              
         plot.caption.position = "plot",                      
-        axis.title.y = element_text(margin = margin(r = 10)))
+        axis.title.y = element_text(margin = margin(r = 10)),
+        legend.title = element_blank(),
+        legend.position = "top")
+
+grafica_desc_no_agreg <- ggplot() +
+  geom_line(data = refinerias |> filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = tasa_1k, group = NOM_MUN, color = NOM_MUN),
+            linewidth = 0.7) +
+  geom_line(data = nacional |> filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = tasa_1k, linetype = "National average"),
+            color = "black",
+            linewidth = 1.2) +
+  facet_wrap(~ grupo_causa, scales = "free_y") +
+  scale_x_continuous(breaks = seq(2012, 2024, 2)) +
+  scale_linetype_manual(values = c("National average" = "dashed")) +
+  labs(x = "", y = "Resident deaths per 1,000 inhabitants") +
+  theme_minimal() +
+  theme(plot.caption = element_text(hjust = 0),
+        plot.caption.position = "plot",
+        axis.title.y = element_text(margin = margin(r = 10)),
+        legend.title = element_blank(),
+        legend.position = "top",
+        text = element_text(size = 18))
+
 ggsave("grafica_desc_no_agreg.png", width = 12, height = 7, dpi = 300)
 
 
@@ -178,46 +197,47 @@ nacional |>
   data.frame() |> 
   mutate(per_diff = ((mean_ref/mean_nac)-1))
 
-ggplot() +
-  geom_line(data = refinerias_grouped |> filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
-            aes(x = AÑO, y = ref_1k_tasa),
-            linewidth = 0.7, color = "red") +
-  geom_line(data = nacional |> filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
-            aes(x = AÑO, y = tasa_1k),
-            color = "black", linewidth = 1.2, linetype = "dashed") +
+grafica_desc_agreg <- ggplot() +
+  geom_line(data = refinerias_grouped |> 
+              filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = ref_1k_tasa, color = "Municipalities with oil refineries"),
+            linewidth = 0.7) +
+  geom_line(data = nacional |> 
+              filter(grupo_causa != "Ill defined illnesses (R00–R99)"),
+            aes(x = AÑO, y = tasa_1k, linetype = "National average"), color = "black",
+            linewidth = 1.2) +
   facet_wrap(~ grupo_causa, scales = "free_y") +
-  scale_x_continuous(breaks = 2012:2024)+
-  labs(x = "Year", 
-       y = "Resident deaths per 1,000 inhabitants",
-       caption = "
-       Dashed black line: national average of municipalities without a refinery, Red line: average of municipalities with a refinery,
-       Data from INEGI (mortality) and CONAPO (yearly population estimates), graph created by Bernardo Luis and Emilio del Río") +
-  theme_minimal()+
-  theme(plot.caption = element_text(hjust = 0),              
-        plot.caption.position = "plot",                      
-        axis.title.y = element_text(margin = margin(r = 10)))
+  scale_x_continuous(breaks = seq(2012, 2024, 2)) +
+  scale_color_manual(values = c("Municipalities with oil refineries" = "red")) +
+  scale_linetype_manual(values = c("National average" = "dashed")) +
+  labs(x = "", y = "Resident deaths per 1,000 inhabitants", color = NULL,
+       linetype = NULL) +
+  theme_minimal() +
+  theme(axis.title.y = element_text(margin = margin(r = 10)),
+        legend.position = "top",
+        text = element_text(size = 18))
+
 ggsave("grafica_desc_agreg.png", width = 12, height = 7, dpi = 300)
 
 
 ### Just for ill defined causes
-ggplot() +
+grafica_ill_defined <- ggplot() +
   geom_line(data = refinerias_grouped |> filter(grupo_causa == "Ill defined illnesses (R00–R99)"),
-            aes(x = AÑO, y = ref_1k_tasa),
-            linewidth = 0.7, color = "red") +
+            aes(x = AÑO, y = ref_1k_tasa, color = "Municipalities with oil refineries"),
+            linewidth = 0.7) +
   geom_line(data = nacional |> filter(grupo_causa == "Ill defined illnesses (R00–R99)"),
-            aes(x = AÑO, y = tasa_1k),
-            color = "black", linewidth = 1.2, linetype = "dashed") +
-  facet_wrap(~ grupo_causa, scales = "free_y") +
-  scale_x_continuous(breaks = 2012:2024)+
-  labs(x = "Year", 
-       y = "Resident deaths per 1,000 inhabitants",
-       caption = "
-       Dashed black line: national average of municipalities without a refinery, Red line: average of municipalities with a refinery,
-       Data from INEGI (mortality) and CONAPO (yearly population estimates), graph created by Bernardo Luis and Emilio del Río") +
+            aes(x = AÑO, y = tasa_1k, linetype = "National average"),
+            color = "black", linewidth = 1.2) +
+  scale_x_continuous(breaks = seq(2012, 2024, 2))+
+  scale_color_manual(values = c("Municipalities with oil refineries" = "red")) +
+  scale_linetype_manual(values = c("National average" = "dashed")) +
+  labs(x = "", y = "Resident deaths per 1,000 inhabitants", color = NULL,
+       linetype = NULL) +
   theme_minimal()+
-  theme(plot.caption = element_text(hjust = 0),              
-        plot.caption.position = "plot",                      
-        axis.title.y = element_text(margin = margin(r = 10)))
+  theme(axis.title.y = element_text(margin = margin(r = 10)),
+        legend.position = "top",
+        text = element_text(size = 18))
+
 ggsave("grafica_ill_defined.png", width = 12, height = 7, dpi = 300)
 
 
@@ -291,7 +311,9 @@ doc <- c(
 )
 
 con <- file("tabla.tex", open = "w", encoding = "UTF-8")
+
 writeLines(doc, con, useBytes = TRUE)
+
 close(con)
 
 tinytex::pdflatex("tabla.tex")
@@ -319,5 +341,4 @@ nacional_60 |>
             mean_ref = mean(ref_1k_tasa)) |> 
   data.frame() |> 
   mutate(per_diff = ((mean_ref/mean_nac)-1))
-
 
